@@ -71,8 +71,11 @@ async def start_bot():
     # Chạy worker song song
     asyncio.create_task(worker())
 
+    # Chạy bot
     await app.run_polling()
 
 # Entry point
 if __name__ == '__main__':
-    asyncio.run(start_bot())
+    # Không gọi asyncio.run() nữa
+    # Vì vòng lặp sự kiện đã được khởi động trong môi trường (ở đây Railway hoặc môi trường hỗ trợ async)
+    asyncio.create_task(start_bot()) 
