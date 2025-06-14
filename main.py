@@ -36,10 +36,9 @@ async def call_dataforseo_api(keyword: str):
     async with aiohttp.ClientSession() as session:
         try:
             async with session.post(url, json=payload, auth=aiohttp.BasicAuth(API_USERNAME, API_PASSWORD)) as resp:
-                resp.raise_for_status() # Sẽ báo lỗi nếu status code là 4xx hoặc 5xx
+                resp.raise_for_status()
                 data = await resp.json()
                 
-                # Kiểm tra cấu trúc dữ liệu trả về
                 if data and data.get('tasks') and data['tasks'][0].get('result'):
                     items = data['tasks'][0]['result'][0].get('items', [])
                     domains = [item['domain'] for item in items if item.get("type") == "organic" and "domain" in item]
@@ -54,20 +53,20 @@ async def call_dataforseo_api(keyword: str):
             logging.error(f"Lỗi không xác định khi xử lý dữ liệu SERP: {e}")
             return [f"Lỗi khi xử lý dữ liệu: {str(e)}"]
 
-# >>>>> PHẦN CODE ĐÃ ĐƯỢC SỬA LẠI <<<<<
+# >>>>> HÀM ĐÃ ĐƯỢC CẬP NHẬT THEO VÍ DỤ CỦA DATA-FOR-SEO <<<<<
 # Gọi API intent và từ khoá phụ
 async def call_search_intent_api(keyword: str):
     intent_url = "https://api.dataforseo.com/v3/dataforseo_labs/google/search_intent/live"
     related_url = "https://api.dataforseo.com/v3/dataforseo_labs/google/related_keywords/live"
 
-    # Payload cho Search Intent, ĐÃ THÊM location_code
+    # Sửa payload theo ví dụ: dùng language_name thay cho language_code
     intent_payload = [{
-        "language_code": "vi",
+        "language_name": "Vietnamese", # <<< THAY ĐỔI CHÍNH
         "location_code": 1028581,
         "keywords": [keyword]
     }]
 
-    # Payload cho Related Keywords
+    # Payload cho Related Keywords vẫn dùng location_code và language_code
     related_payload = [{
         "language_code": "vi",
         "location_code": 1028581,
@@ -153,7 +152,6 @@ async def worker():
                 if action == 'search':
                     domains = await call_dataforseo_api(keyword)
                     if domains:
-                        # Kiểm tra xem có phải là thông báo lỗi từ API không
                         if isinstance(domains[0], str) and domains[0].startswith("Lỗi"):
                             msg = f"❌ Đã xảy ra lỗi khi lấy dữ liệu cho \"{keyword}\":\n{domains[0]}"
                         else:
@@ -192,13 +190,11 @@ async def main():
     app.add_handler(CommandHandler("search", search))
     app.add_handler(CommandHandler("intent", intent))
     
-    # Khởi chạy worker như một background task
     asyncio.create_task(worker())
     
     print("🤖 Bot đang chạy...")
     logging.info("Bot started successfully.")
     
-    # Chạy bot
     await app.run_polling()
 
 # Khởi động
