@@ -22,7 +22,7 @@ async def call_dataforseo_api(keyword: str):
     url = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
     payload = {
         "keyword": keyword,
-        "location_code": 2840,  # Việt Nam
+        "location_code": 1028581,  # Việt Nam
         "language_code": "vi",
         "depth": 10
     }
