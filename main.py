@@ -7,23 +7,23 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import nest_asyncio
 
-# Lấy thông tin từ biến môi trường
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO)
+
+# Thông tin xác thực từ biến môi trường
 API_USERNAME = os.getenv("API_USERNAME")
 API_PASSWORD = os.getenv("API_PASSWORD")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-
-# Hàng đợi xử lý từ người dùng
+# Hàng đợi xử lý
 job_queue = Queue()
 
-# Gọi API DataForSEO để lấy domain top 10 cho từ khóa
+# Gọi API DataForSEO: Lấy top 10 domain
 async def call_dataforseo_api(keyword: str):
     url = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
     payload = [{
         "keyword": keyword,
-        "location_code": 1028581,  # Việt Nam
+        "location_code": 1028581,
         "language_code": "vi",
         "depth": 10
     }]
@@ -39,7 +39,7 @@ async def call_dataforseo_api(keyword: str):
                 logging.error(f"Lỗi xử lý dữ liệu: {e}")
                 return [f"Lỗi khi lấy dữ liệu: {str(e)}"]
 
-# Gọi API intent và related keywords
+# Gọi API intent và từ khoá phụ
 async def call_search_intent_api(keyword: str):
     intent_url = "https://api.dataforseo.com/v3/dataforseo_labs/google/search_intent/live"
     related_url = "https://api.dataforseo.com/v3/dataforseo_labs/google/related_keywords/live"
@@ -57,109 +57,97 @@ async def call_search_intent_api(keyword: str):
     }]
 
     async with aiohttp.ClientSession() as session:
-        intent_task = session.post(intent_url, json=intent_payload, auth=aiohttp.BasicAuth(API_USERNAME, API_PASSWORD))
-        related_task = session.post(related_url, json=related_payload, auth=aiohttp.BasicAuth(API_USERNAME, API_PASSWORD))
-        intent_resp, related_resp = await asyncio.gather(intent_task, related_task)
-
-        intent_data = await intent_resp.json()
-        related_data = await related_resp.json()
-
-        # Intent
-        try:
-            result = intent_data["tasks"][0]["result"][0]["search_intent_info"]
-            intent_type = result.get("main_intent", "Không xác định")
-        except:
-            intent_type = None
+        # Search intent
+        async with session.post(intent_url, json=intent_payload, auth=aiohttp.BasicAuth(API_USERNAME, API_PASSWORD)) as r1:
+            intent_data = await r1.json()
 
         # Related keywords
-        related_keywords = []
-        try:
-            for kw in related_data["tasks"][0]["result"]:
-                txt = kw.get("keyword")
-                if txt and txt != keyword:
-                    related_keywords.append(txt)
-                if len(related_keywords) >= 3:
-                    break
-        except:
-            pass
+        async with session.post(related_url, json=related_payload, auth=aiohttp.BasicAuth(API_USERNAME, API_PASSWORD)) as r2:
+            related_data = await r2.json()
 
-        return intent_type, related_keywords
+    try:
+        intent = intent_data["tasks"][0]["result"][0]["search_intent_info"]["main_intent"]
+    except:
+        intent = None
+    try:
+        kws = [item["keyword"] for item in related_data["tasks"][0]["result"]][:3]
+    except:
+        kws = []
 
-# /start
+    return intent, kws
+
+# Lệnh /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = (
-        "🤖 Xin chào! Tôi là bot hỗ trợ kiểm tra thứ hạng từ khóa trên Google.\n\n"
-        "👉 Để kiểm tra thứ hạng, hãy dùng lệnh:\n"
-        "/search từ_khóa\n"
-        "Ví dụ: /search go88\n\n"
-        "🔍 Để phân tích intent và từ khoá phụ: /intent từ_khóa"
+    msg = (
+        "🤖 Chào bạn! Tôi là bot hỗ trợ kiểm tra thứ hạng và intent từ khóa trên Google.\n\n"
+        "👉 Dùng lệnh:\n"
+        "/search từ_khóa – Xem top 10 domain\n"
+        "/intent từ_khóa – Phân tích intent + từ khoá phụ\n"
+        "/getidtele – Xem ID Telegram"
     )
-    await update.message.reply_text(message)
+    await update.message.reply_text(msg)
 
-# /getidtele
+# Lệnh /getidtele
 async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"🆔 ID Telegram của bạn là: {user_id}")
+    await update.message.reply_text(f"🆔 ID Telegram của bạn là: {update.effective_user.id}")
 
-# /search
+# Lệnh /search
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = ' '.join(context.args)
     if not keyword:
         await update.message.reply_text("⚠️ Vui lòng nhập từ khóa sau lệnh /search\nVí dụ: /search go88")
         return
-    await update.message.reply_text("⏳ Đang xử lý, vui lòng chờ giây lát...")
-    job_queue.put((update, keyword))
+    await update.message.reply_text("⏳ Đang xử lý...")
+    job_queue.put((update, 'search', keyword))
 
-# Hàng đợi xử lý tìm kiếm
-async def worker(application):
-    while True:
-        if not job_queue.empty():
-            update, keyword = job_queue.get()
-            domains = await call_dataforseo_api(keyword)
-            if domains:
-                msg = "\n".join([f"🔹 Top {i+1}: {domain}" for i, domain in enumerate(domains[:10])])
-            else:
-                msg = "❌ Không tìm thấy kết quả."
-            try:
-                await update.message.reply_text(f"📊 Top 10 domain cho từ khóa \"{keyword}\":\n{msg}")
-            except Exception as e:
-                logging.warning(f"Lỗi gửi tin nhắn: {e}")
-        await asyncio.sleep(1)
-
-# /intent
+# Lệnh /intent
 async def intent(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = ' '.join(context.args)
     if not keyword:
-        await update.message.reply_text("⚠️ Dùng: /intent từ_khóa (ví dụ: /intent máy lạnh mini)")
+        await update.message.reply_text("⚠️ Vui lòng nhập từ khóa sau lệnh /intent\nVí dụ: /intent giày thể thao")
         return
+    await update.message.reply_text("⏳ Đang phân tích intent...")
+    job_queue.put((update, 'intent', keyword))
 
-    await update.message.reply_text("🧠 Đang phân tích intent và từ khoá phụ…")
+# Worker xử lý hàng đợi
+async def worker():
+    while True:
+        if not job_queue.empty():
+            update, action, keyword = job_queue.get()
+            try:
+                if action == 'search':
+                    domains = await call_dataforseo_api(keyword)
+                    if domains:
+                        msg = "\n".join([f"🔹 Top {i+1}: {domain}" for i, domain in enumerate(domains[:10])])
+                        await update.message.reply_text(f"📊 Top 10 domain cho từ khóa \"{keyword}\":\n{msg}")
+                    else:
+                        await update.message.reply_text("❌ Không tìm thấy kết quả.")
+                elif action == 'intent':
+                    intent_type, related_kws = await call_search_intent_api(keyword)
+                    if not intent_type:
+                        await update.message.reply_text("❌ Không xác định được intent.")
+                    else:
+                        msg = f"🔍 Intent: `{intent_type}`\n\n"
+                        if related_kws:
+                            msg += "🧩 Từ khoá phụ:\n" + '\n'.join([f"- {kw}" for kw in related_kws])
+                        await update.message.reply_text(msg, parse_mode="Markdown")
+            except Exception as e:
+                logging.error(f"Lỗi trong worker: {e}")
+                await update.message.reply_text("❗ Đã xảy ra lỗi khi xử lý yêu cầu.")
+        await asyncio.sleep(1)
 
-    intent_type, related_keywords = await call_search_intent_api(keyword)
-
-    if not intent_type:
-        await update.message.reply_text("❌ Không định được intent. Có thể API bị lỗi.")
-        return
-
-    msg = f"🔸 *Search Intent:* `{intent_type}`"
-    if related_keywords:
-        msg += "\n\n🧩 *Từ khoá phụ đề xuất:*"
-        msg += "".join(f"\n- {kw}" for kw in related_keywords)
-
-    await update.message.reply_text(msg, parse_mode="Markdown")
-
-# Cài đặt và khởi chạy bot
+# Cấu hình bot
 async def setup():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("getidtele", get_id))
     app.add_handler(CommandHandler("search", search))
     app.add_handler(CommandHandler("intent", intent))
-    asyncio.create_task(worker(app))
+    asyncio.create_task(worker())
     print("🤖 Bot đang chạy...")
     await app.run_polling()
 
+# Khởi động
 if __name__ == "__main__":
     nest_asyncio.apply()
-    asyncio.get_event_loop().create_task(setup())
-    asyncio.get_event_loop().run_forever()
+    asyncio.get_event_loop().run_until_complete(setup())
