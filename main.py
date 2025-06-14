@@ -6,10 +6,9 @@ import asyncio
 from queue import Queue
 
 # Thông tin xác thực
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-API_USERNAME = os.environ.get("API_USERNAME")
-API_PASSWORD = os.environ.get("API_PASSWORD")
-
+API_USERNAME = os.getenv("API_USERNAME")
+API_PASSWORD = os.getenv("API_PASSWORD")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
 
