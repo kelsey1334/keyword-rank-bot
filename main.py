@@ -1,11 +1,11 @@
 import os
 import logging
-import asyncio
 from queue import Queue
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import aiohttp
+import asyncio
 
 # Lấy thông tin từ biến môi trường
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -75,4 +75,4 @@ async def start_bot():
 
 # Entry point
 if __name__ == '__main__':
-    asyncio.get_event_loop().run_until_complete(start_bot())
+    asyncio.run(start_bot())
