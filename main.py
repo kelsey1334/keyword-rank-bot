@@ -1,22 +1,29 @@
 import logging
 import os
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import aiohttp
 import asyncio
-from queue import Queue
 from datetime import time
+from queue import Queue
 
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, ContextTypes
+)
+
+# Load biến môi trường
 API_USERNAME = os.getenv("API_USERNAME")
 API_PASSWORD = os.getenv("API_PASSWORD")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")  # OpenWeatherMap
-EXCHANGE_API_KEY = os.getenv("EXCHANGE_API_KEY")  # Optional
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+EXCHANGE_API_KEY = os.getenv("EXCHANGE_API_KEY")
+ADMIN_TELEGRAM_ID = os.getenv("ADMIN_TELEGRAM_ID")  # ID của bạn
 
+# Logging
 logging.basicConfig(level=logging.INFO)
 job_queue = Queue()
 
-# Lấy top domain không chứa quảng cáo
+# ==================== GỌI API =====================
+
 async def call_dataforseo_api(keyword: str):
     url = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
     payload = {
@@ -25,7 +32,6 @@ async def call_dataforseo_api(keyword: str):
         "language_code": "vi",
         "depth": 10
     }
-
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=[payload], auth=aiohttp.BasicAuth(API_USERNAME, API_PASSWORD)) as resp:
             data = await resp.json()
@@ -36,20 +42,31 @@ async def call_dataforseo_api(keyword: str):
             except Exception as e:
                 return [f"Lỗi khi lấy dữ liệu: {str(e)}"]
 
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyword = ' '.join(context.args)
-    if not keyword:
-        await update.message.reply_text("Vui lòng nhập từ khóa sau lệnh /search")
-        return
-    await update.message.reply_text("Đang xử lý...")
-    job_queue.put((update, keyword))
+async def get_weather_bangkok():
+    url = f"https://api.openweathermap.org/data/2.5/weather?q=Bangkok&appid={WEATHER_API_KEY}&units=metric&lang=vi"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
+            try:
+                temp = data['main']['temp']
+                desc = data['weather'][0]['description'].capitalize()
+                return f"🌤 Thời tiết Bangkok hôm nay: {desc}, nhiệt độ {temp}°C"
+            except:
+                return "Không thể lấy dữ liệu thời tiết."
 
-# Gửi ID người dùng
-async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"ID của telegram của bạn là: {user_id}")
+async def get_exchange_rate():
+    url = f"https://v6.exchangerate-api.com/v6/{EXCHANGE_API_KEY}/latest/THB"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
+            try:
+                rate = data['conversion_rates']['VND']
+                return f"💱 100 Baht = {round(rate * 100):,} VND"
+            except:
+                return "Không lấy được tỷ giá."
 
-# Gửi lời chào khi /start
+# ==================== LỆNH BOT =====================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = (
         "🤖 Xin chào! Chào mừng bạn đến với bot kiểm tra thứ hạng Google!\n\n"
@@ -62,8 +79,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(message, parse_mode="Markdown")
 
-# Xử lý hàng đợi
-async def worker(application):
+async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyword = ' '.join(context.args)
+    if not keyword:
+        await update.message.reply_text("Vui lòng nhập từ khóa sau lệnh /search")
+        return
+    await update.message.reply_text("Đang xử lý...")
+    job_queue.put((update, keyword))
+
+async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    await update.message.reply_text(f"ID của telegram của bạn là: {user_id}")
+
+async def tygia(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = await get_exchange_rate()
+    await update.message.reply_text(text)
+
+# ==================== WORKER & SCHEDULER =====================
+
+async def worker(app):
     while True:
         if not job_queue.empty():
             update, keyword = job_queue.get()
@@ -75,65 +109,40 @@ async def worker(application):
             try:
                 await update.message.reply_text(f"🔍 Kết quả cho từ khóa \"{keyword}\":\n{msg}")
             except Exception as e:
-                logging.warning(f"Gửi tin nhắn lỗi: {e}")
+                logging.warning(f"Lỗi gửi tin nhắn: {e}")
         await asyncio.sleep(1)
 
-# API thời tiết
-async def get_weather_bangkok():
-    url = f"https://api.openweathermap.org/data/2.5/weather?q=Bangkok&appid={WEATHER_API_KEY}&units=metric&lang=vi"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            temp = data['main']['temp']
-            desc = data['weather'][0]['description'].capitalize()
-            return f"🌤 Thời tiết Bangkok hôm nay: {desc}, nhiệt độ {temp}°C"
-
-# API tỷ giá
-async def get_exchange_rate():
-    url = f"https://v6.exchangerate-api.com/v6/{EXCHANGE_API_KEY}/latest/THB"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            try:
-                rate = data['conversion_rates']['VND']
-                return f"💱 100 Baht = {round(rate * 100):,} VND"
-            except:
-                return "Không lấy được tỷ giá."
-
-# Lệnh chủ động /tygia
-async def tygia(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = await get_exchange_rate()
-    await update.message.reply_text(text)
-
-# Thông báo tự động buổi sáng
 async def morning_message(context: ContextTypes.DEFAULT_TYPE):
-    chat_id = os.getenv("ADMIN_TELEGRAM_ID")  # Thay bằng ID cá nhân của bạn
     weather = await get_weather_bangkok()
     exchange = await get_exchange_rate()
     quote = "🌱 Mỗi ngày là một cơ hội để tốt hơn hôm qua."
     food = "🥣 Gợi ý món sáng: Cháo thịt bằm hoặc mì trộn cay Thái."
-
     message = f"{weather}\n\n{food}\n\n{quote}\n\n{exchange}"
-    await context.bot.send_message(chat_id=chat_id, text=message)
+    await context.bot.send_message(chat_id=ADMIN_TELEGRAM_ID, text=message)
 
-# Chạy bot
+# ==================== KHỞI CHẠY BOT =====================
+
 async def setup():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("search", search))
     app.add_handler(CommandHandler("getidtele", get_id))
     app.add_handler(CommandHandler("tygia", tygia))
 
-    asyncio.create_task(worker(app))
-
-    # Đặt lịch 8h sáng hàng ngày
     app.job_queue.run_daily(morning_message, time=time(hour=8, minute=0))
+
+    # Chạy worker sau khi bot khởi động xong
+    async def start_bg(app):
+        asyncio.create_task(worker(app))
+    app.post_init = start_bg
 
     print("Bot đang chạy...")
     await app.run_polling()
 
+# ==================== MAIN =====================
+
 if __name__ == "__main__":
     import nest_asyncio
     nest_asyncio.apply()
-    asyncio.get_event_loop().create_task(setup())
-    asyncio.get_event_loop().run_forever()
+    asyncio.run(setup())
