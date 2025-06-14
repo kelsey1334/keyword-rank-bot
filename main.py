@@ -66,9 +66,14 @@ async def call_search_intent_api(keyword: str):
             related_data = await r2.json()
 
     try:
-        intent = intent_data["tasks"][0]["result"][0]["search_intent_info"]["main_intent"]
+        result = intent_data.get("tasks", [])[0].get("result", [])
+        if result and "search_intent_info" in result[0]:
+            intent = result[0]["search_intent_info"].get("main_intent")
+        else:
+            intent = None
     except:
         intent = None
+
     try:
         kws = [item["keyword"] for item in related_data["tasks"][0]["result"]][:3]
     except:
