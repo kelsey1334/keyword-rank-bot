@@ -1,33 +1,27 @@
-import os
 import logging
-from queue import Queue
-
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import aiohttp
 import asyncio
+from queue import Queue
 
-# Lấy thông tin từ biến môi trường
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_USERNAME = os.getenv("API_USERNAME")
-API_PASSWORD = os.getenv("API_PASSWORD")
+# Thông tin xác thực
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+API_USERNAME = os.environ.get("API_USERNAME")
+API_PASSWORD = os.environ.get("API_PASSWORD")
 
-# Kiểm tra biến môi trường có đầy đủ chưa
-if not BOT_TOKEN or not API_USERNAME or not API_PASSWORD:
-    raise ValueError("Thiếu BOT_TOKEN, API_USERNAME hoặc API_PASSWORD trong biến môi trường.")
-
-# Hàng đợi để xử lý keyword
-job_queue = Queue()
-
-# Logging để debug
+# Cấu hình logging
 logging.basicConfig(level=logging.INFO)
 
-# Gọi API của DataForSEO để lấy top domain
+# Hàng đợi xử lý
+job_queue = Queue()
+
+# Gọi API từ DataForSEO
 async def call_dataforseo_api(keyword: str):
     url = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
     payload = {
         "keyword": keyword,
-        "location_code": 2376,  # Vietnam
+        "location_code": 2376,  # Việt Nam
         "language_code": "vi",
         "depth": 10
     }
@@ -42,13 +36,12 @@ async def call_dataforseo_api(keyword: str):
             except Exception as e:
                 return [f"Lỗi khi lấy dữ liệu: {str(e)}"]
 
-# Khi người dùng nhập /search
+# Lệnh /search
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyword = ' '.join(context.args)
     if not keyword:
         await update.message.reply_text("Vui lòng nhập từ khóa sau lệnh /search")
         return
-
     await update.message.reply_text("Đang xử lý...")
     job_queue.put((update, keyword))
 
@@ -63,19 +56,20 @@ async def worker():
         await asyncio.sleep(1)
 
 # Hàm khởi chạy bot
-async def start_bot():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+async def main():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("search", search))
 
-    app.add_handler(CommandHandler("search", search))
-
-    # Chạy worker song song
+    # Khởi chạy worker trong nền
     asyncio.create_task(worker())
 
     # Chạy bot
-    await app.run_polling()
+    await application.initialize()
+    await application.start()
+    print("Bot đang chạy...")
+    await application.updater.start_polling()
+    await application.updater.idle()
 
-# Entry point
+# Khởi chạy nếu là file chính
 if __name__ == '__main__':
-    # Không gọi asyncio.run() nữa
-    # Vì vòng lặp sự kiện đã được khởi động trong môi trường (ở đây Railway hoặc môi trường hỗ trợ async)
-    asyncio.create_task(start_bot()) 
+    asyncio.run(main())
