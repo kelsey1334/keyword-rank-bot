@@ -24,8 +24,7 @@ async def call_dataforseo_api(keyword: str):
         "keyword": keyword,
         "location_code": 2840,  # Việt Nam
         "language_code": "vi",
-        "depth": 10,
-        "device": "mobile"
+        "depth": 10
     }
 
     async with aiohttp.ClientSession() as session:
